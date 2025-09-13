@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ACCDIR="${HOME}/.git-accounts"
+mkdir -p "${ACCDIR}"
+
+usage() {
+  cat <<USAGE
+Usage:
+  git-acc add <name> "<Full Name>" "<email@example.com>"
+  git-acc list
+  git-acc show <name>
+USAGE
+}
+
+cmd_add() {
+  [[ $# -lt 3 ]] && { usage; exit 1; }
+  local name="$1" fullname="$2" email="$3"
+  local f="${ACCDIR}/${name}.conf"
+  cat > "${f}" <<E
+NAME="${fullname}"
+EMAIL="${email}"
+HOST="github.com-${name}"
+KEY="${HOME}/.ssh/id_ed25519_${name}"
+E
+  chmod 600 "${f}"
+  echo "Saved ${name} -> ${f}"
+}
+
+cmd_list() {
+  shopt -s nullglob
+  local files=("${ACCDIR}"/*.conf)
+  if ((${#files[@]} == 0)); then
+    echo "(no accounts yet)"
+    return
+  fi
+  local f base
+  for f in "${files[@]}"; do
+    base=${f##*/}          # strip path
+    printf '%s\n' "${base%.conf}"  # strip .conf
+  done
+}
+
+cmd_show() {
+  [[ $# -lt 1 ]] && { usage; exit 1; }
+  local name="$1"
+  local f="${ACCDIR}/${name}.conf"
+  [[ -f "${f}" ]] || { echo "No such account: ${name}"; exit 1; }
+  cat "${f}"
+}
+
+main() {
+  [[ $# -lt 1 ]] && { usage; exit 1; }
+  case "$1" in
+    add) shift; cmd_add "$@";;
+    list) shift; cmd_list;;
+    show) shift; cmd_show "$@";;
+    -h|--help|help) usage;;
+    *) echo "Unknown command: $1"; usage; exit 1;;
+  esac
+}
+main "$@"
