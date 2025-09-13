@@ -17,10 +17,26 @@ teardown() {
   rm -rf "$HOME"
 }
 
-@test "add creates account file" {
+@test "add creates account file and SSH key" {
   run git-acc add personal "Jane Dev" "jane@example.com"
   [ "$status" -eq 0 ]
   [ -f "$HOME/.git-accounts/personal.conf" ]
+  [ -f "$HOME/.ssh/id_ed25519_personal" ]
+  [ -f "$HOME/.ssh/id_ed25519_personal.pub" ]
+}
+
+@test "add creates SSH config entry" {
+  git-acc add personal "Jane Dev" "jane@example.com" >/dev/null
+  [ -f "$HOME/.ssh/config" ]
+  run grep "Host github.com-personal" "$HOME/.ssh/config"
+  [ "$status" -eq 0 ]
+}
+
+@test "add prevents duplicate accounts" {
+  git-acc add personal "Jane Dev" "jane@example.com" >/dev/null
+  run git-acc add personal "Jane Dev" "jane@example.com"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"already exists"* ]]
 }
 
 @test "list shows created account" {
@@ -36,4 +52,36 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'NAME="Jane Dev"'* ]]
   [[ "$output" == *'EMAIL="jane@example.com"'* ]]
+}
+
+@test "use switches to account" {
+  git-acc add personal "Jane Dev" "jane@example.com" >/dev/null
+  echo "y" | git-acc use personal >/dev/null
+  run git-acc current
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"personal"* ]]
+  [[ "$output" == *"Jane Dev"* ]]
+}
+
+@test "current shows no account when none active" {
+  run git-acc current
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No account currently active"* ]]
+}
+
+@test "remove deletes account and files" {
+  git-acc add personal "Jane Dev" "jane@example.com" >/dev/null
+  echo "y" | git-acc remove personal >/dev/null
+  [ ! -f "$HOME/.git-accounts/personal.conf" ]
+  [ ! -f "$HOME/.ssh/id_ed25519_personal" ]
+  [ ! -f "$HOME/.ssh/id_ed25519_personal.pub" ]
+}
+
+@test "remove clears current account if it was removed" {
+  git-acc add personal "Jane Dev" "jane@example.com" >/dev/null
+  echo "y" | git-acc use personal >/dev/null
+  echo "y" | git-acc remove personal >/dev/null
+  run git-acc current
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No account currently active"* ]]
 }

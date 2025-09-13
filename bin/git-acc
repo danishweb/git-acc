@@ -2,14 +2,21 @@
 set -euo pipefail
 
 ACCDIR="${HOME}/.git-accounts"
+SSHDIR="${HOME}/.ssh"
+CURRENT_ACCOUNT_FILE="${ACCDIR}/.current"
+
 mkdir -p "${ACCDIR}"
+mkdir -p "${SSHDIR}"
 
 usage() {
   cat <<USAGE
 Usage:
   git-acc add <name> "<Full Name>" "<email@example.com>"
-  git-acc list
-  git-acc show <name>
+  git-acc use <name>                    # Switch to account
+  git-acc current                       # Show current account
+  git-acc list                          # List all accounts
+  git-acc remove <name>                 # Remove account
+  git-acc show <name>                   # Show account details
 USAGE
 }
 
@@ -17,14 +24,42 @@ cmd_add() {
   [[ $# -lt 3 ]] && { usage; exit 1; }
   local name="$1" fullname="$2" email="$3"
   local f="${ACCDIR}/${name}.conf"
+  local ssh_key="${SSHDIR}/id_ed25519_${name}"
+  local ssh_pub="${ssh_key}.pub"
+  
+  # Check if account already exists
+  if [[ -f "${f}" ]]; then
+    echo "Error: Account '${name}' already exists"
+    exit 1
+  fi
+  
+  # Generate SSH key pair
+  echo "Generating SSH key for account '${name}'..."
+  ssh-keygen -t ed25519 -f "${ssh_key}" -C "${email}" -N ""
+  chmod 600 "${ssh_key}"
+  chmod 644 "${ssh_pub}"
+  
+  # Create account config
   cat > "${f}" <<E
 NAME="${fullname}"
 EMAIL="${email}"
-HOST="github.com-${name}"
-KEY="${HOME}/.ssh/id_ed25519_${name}"
+GITHUB_USERNAME=""
+SSH_KEY_PATH="${ssh_key}"
+SSH_HOST="github.com-${name}"
 E
   chmod 600 "${f}"
-  echo "Saved ${name} -> ${f}"
+  
+  # Update SSH config
+  update_ssh_config "${name}" "${ssh_key}"
+  
+  echo "✅ Account '${name}' created successfully!"
+  echo "   Name: ${fullname}"
+  echo "   Email: ${email}"
+  echo "   SSH Key: ${ssh_key}"
+  echo ""
+  echo "Next steps:"
+  echo "1. Run 'git-acc use ${name}' to switch to this account"
+  echo "2. This will open GitHub OAuth for authentication"
 }
 
 cmd_list() {
@@ -49,11 +84,145 @@ cmd_show() {
   cat "${f}"
 }
 
+cmd_use() {
+  [[ $# -lt 1 ]] && { usage; exit 1; }
+  local name="$1"
+  local f="${ACCDIR}/${name}.conf"
+  
+  [[ -f "${f}" ]] || { echo "Error: Account '${name}' does not exist"; exit 1; }
+  
+  # Load account config
+  source "${f}"
+  
+  echo "Switching to account '${name}'..."
+  echo "This will open GitHub OAuth for authentication."
+  echo "Press Enter to continue or Ctrl+C to cancel..."
+  read -r
+  
+  # For now, just update git config (OAuth will be added in v0.3.0)
+  echo "Updating git configuration..."
+  git config --global user.name "${NAME}"
+  git config --global user.email "${EMAIL}"
+  
+  # Update current account
+  echo "${name}" > "${CURRENT_ACCOUNT_FILE}"
+  
+  echo "✅ Switched to account '${name}'"
+  echo "   Name: ${NAME}"
+  echo "   Email: ${EMAIL}"
+  echo ""
+  echo "Note: GitHub OAuth integration will be added in v0.3.0"
+  echo "For now, you can manually add the SSH key to GitHub:"
+  echo "   cat ${SSH_KEY_PATH}.pub"
+}
+
+cmd_current() {
+  if [[ -f "${CURRENT_ACCOUNT_FILE}" ]]; then
+    local current=$(cat "${CURRENT_ACCOUNT_FILE}")
+    echo "Current account: ${current}"
+    
+    local f="${ACCDIR}/${current}.conf"
+    if [[ -f "${f}" ]]; then
+      source "${f}"
+      echo "   Name: ${NAME}"
+      echo "   Email: ${EMAIL}"
+    fi
+  else
+    echo "No account currently active"
+  fi
+}
+
+cmd_remove() {
+  [[ $# -lt 1 ]] && { usage; exit 1; }
+  local name="$1"
+  local f="${ACCDIR}/${name}.conf"
+  
+  [[ -f "${f}" ]] || { echo "Error: Account '${name}' does not exist"; exit 1; }
+  
+  # Load account config
+  source "${f}"
+  
+  echo "Removing account '${name}'..."
+  echo "This will delete:"
+  echo "  - Account config: ${f}"
+  echo "  - SSH key: ${SSH_KEY_PATH}"
+  echo "  - SSH public key: ${SSH_KEY_PATH}.pub"
+  echo ""
+  echo "Are you sure? (y/N)"
+  read -r response
+  if [[ "${response}" =~ ^[Yy]$ ]]; then
+    # Remove SSH key from SSH config
+    remove_ssh_config "${name}"
+    
+    # Remove files
+    rm -f "${f}"
+    rm -f "${SSH_KEY_PATH}"
+    rm -f "${SSH_KEY_PATH}.pub"
+    
+    # Clear current account if it was this one
+    if [[ -f "${CURRENT_ACCOUNT_FILE}" ]] && [[ "$(cat "${CURRENT_ACCOUNT_FILE}")" == "${name}" ]]; then
+      rm -f "${CURRENT_ACCOUNT_FILE}"
+    fi
+    
+    echo "✅ Account '${name}' removed successfully"
+  else
+    echo "Cancelled"
+  fi
+}
+
+# Helper function to update SSH config
+update_ssh_config() {
+  local name="$1"
+  local ssh_key="$2"
+  local ssh_config="${SSHDIR}/config"
+  local host="github.com-${name}"
+  
+  # Create SSH config if it doesn't exist
+  if [[ ! -f "${ssh_config}" ]]; then
+    touch "${ssh_config}"
+    chmod 600 "${ssh_config}"
+  fi
+  
+  # Check if host already exists
+  if grep -q "Host ${host}" "${ssh_config}"; then
+    echo "SSH config already contains entry for ${host}"
+    return
+  fi
+  
+  # Add SSH config entry
+  cat >> "${ssh_config}" <<E
+
+Host ${host}
+    HostName github.com
+    User git
+    IdentityFile ${ssh_key}
+    IdentitiesOnly yes
+E
+  
+  echo "Added SSH config entry for ${host}"
+}
+
+# Helper function to remove SSH config entry
+remove_ssh_config() {
+  local name="$1"
+  local host="github.com-${name}"
+  local ssh_config="${SSHDIR}/config"
+  
+  if [[ -f "${ssh_config}" ]]; then
+    # Remove the host block from SSH config
+    sed -i.bak "/^Host ${host}$/,/^$/d" "${ssh_config}"
+    echo "Removed SSH config entry for ${host}"
+  fi
+}
+
 main() {
   [[ $# -lt 1 ]] && { usage; exit 1; }
   case "$1" in
     add) shift; cmd_add "$@";;
+    use) shift; cmd_use "$@";;
+    current) shift; cmd_current;;
     list) shift; cmd_list;;
+    remove) shift; cmd_remove "$@";;
     show) shift; cmd_show "$@";;
     -h|--help|help) usage;;
     *) echo "Unknown command: $1"; usage; exit 1;;
