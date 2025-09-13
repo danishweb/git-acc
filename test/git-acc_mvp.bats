@@ -1,12 +1,16 @@
 #!/usr/bin/env bats
 
 setup() {
+  # Isolate HOME so we don't touch the runner's real home
   export HOME="$(mktemp -d)"
   mkdir -p "$HOME/.ssh"
   chmod 700 "$HOME/.ssh"
-  mkdir -p "$(pwd)/bin"
-  cp ./bin/git-acc "$(pwd)/bin/git-acc"
-  PATH="$(pwd)/bin:$PATH"
+
+  # Use the repo's bin directly; no copy needed
+  PATH="$PWD/bin:$PATH"
+
+  # Optional: isolate global git config so tests don't see runner's config
+  export GIT_CONFIG_GLOBAL="$HOME/.gitconfig"
 }
 
 teardown() {
@@ -23,13 +27,13 @@ teardown() {
   git-acc add personal "Jane Dev" "jane@example.com" >/dev/null
   run git-acc list
   [ "$status" -eq 0 ]
-  [[ "${output}" == *"personal"* ]]
+  [[ "$output" == *"personal"* ]]
 }
 
 @test "show prints account contents" {
   git-acc add personal "Jane Dev" "jane@example.com" >/dev/null
   run git-acc show personal
   [ "$status" -eq 0 ]
-  [[ "${output}" == *'NAME="Jane Dev"'* ]]
-  [[ "${output}" == *'EMAIL="jane@example.com"'* ]]
+  [[ "$output" == *'NAME="Jane Dev"'* ]]
+  [[ "$output" == *'EMAIL="jane@example.com"'* ]]
 }
