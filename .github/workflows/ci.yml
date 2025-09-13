@@ -1,9 +1,9 @@
 name: CI
 on:
   push:
-    branches: [ main, "**" ]
+    branches: [main, "**"]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -13,3 +13,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Lint script
         run: shellcheck bin/git-acc
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run tests
+        run: bats --tap test
