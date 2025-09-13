@@ -28,8 +28,17 @@ E
 }
 
 cmd_list() {
-  ls -1 "${ACCDIR}"/*.conf 2>/dev/null \
-    | sed "s|${ACCDIR}/||; s|\.conf$||" || echo "(no accounts yet)"
+  shopt -s nullglob
+  local files=("${ACCDIR}"/*.conf)
+  if ((${#files[@]} == 0)); then
+    echo "(no accounts yet)"
+    return
+  fi
+  local f base
+  for f in "${files[@]}"; do
+    base=${f##*/}          # strip path
+    printf '%s\n' "${base%.conf}"  # strip .conf
+  done
 }
 
 cmd_show() {
